@@ -1,0 +1,39 @@
+name: Execute SSH_Collect Commands
+
+on:
+  workflow_dispatch: # 手动触发工作流
+  schedule:
+    - cron: "0 */2 * * *"  # 每两小时运行一次
+
+jobs:
+  execute-commands:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSHPass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Get ACCOUNTS_JSON
+        id: get-accounts
+        run: |
+          echo "$ACCOUNTS_JSON" > accounts.json
+        env:
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+
+      - name: Generate SSH Commands
+        id: generate-ssh-commands
+        run: |
+          echo "#!/bin/bash" > sshpass.sh
+          while IFS= read -r account; do
+            username=$(echo "$account" | jq -r '.username')
+            password=$(echo "$account" | jq -r '.password')
+            ssh=$(echo "$account" | jq -r '.ssh')
+            gist_username=$(echo "$account" | jq -r '.gist.username')
+            gist_id=$(echo "$account" | jq -r '.gist.id')
+
+            echo "echo \"Executing for $username@$ssh\"" >> sshpass.sh
+            echo "sshpass -p '$password' ssh -o StrictHostKeyChecking=no '$username@$ssh' 'nohup python3 -u  /home/codeboy/repo/aggregator/subscribe/collect.py  --all --overwrite --skip --gist ${gist_username}/${gist_id} --key ${{ secrets.GIST_PAT }} > /dev/null 2>&1 &'" >> sshpass.sh
+          done < <(jq -c '.[]' accounts.json)
+          chmod +x sshpass.sh
+
+      - name: Execute SSH Commands
+        run: ./sshpass.sh
